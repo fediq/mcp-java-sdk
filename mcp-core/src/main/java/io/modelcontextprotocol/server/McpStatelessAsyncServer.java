@@ -134,6 +134,12 @@ public class McpStatelessAsyncServer {
 			requestHandlers.put(McpSchema.METHOD_COMPLETION_COMPLETE, completionCompleteRequestHandler());
 		}
 
+		features.requestHandlers().forEach((method, requestHandler) -> {
+			McpStatelessServerFeatures.validateRequestHandler(method, requestHandler);
+			Assert.isTrue(!requestHandlers.containsKey(method), "Duplicate request method: " + method);
+			requestHandlers.put(method, requestHandler);
+		});
+
 		this.protocolVersions = new ArrayList<>(mcpTransport.protocolVersions());
 
 		Map<String, McpStatelessNotificationHandler> notificationHandlers = prepareNotificationHandlers();

@@ -36,7 +36,7 @@ class DefaultMcpStatelessServerHandler implements McpStatelessServerHandler {
 					new McpSchema.JSONRPCResponse.JSONRPCError(McpSchema.ErrorCodes.METHOD_NOT_FOUND,
 							"Method not found: " + request.method(), null)));
 		}
-		return requestHandler.handle(transportContext, request.params())
+		return Mono.defer(() -> requestHandler.handle(transportContext, request.params()))
 			.map(result -> McpSchema.JSONRPCResponse.result(request.id(), result))
 			.onErrorResume(t -> {
 				McpSchema.JSONRPCResponse.JSONRPCError error;
@@ -45,7 +45,7 @@ class DefaultMcpStatelessServerHandler implements McpStatelessServerHandler {
 				}
 				else {
 					error = new McpSchema.JSONRPCResponse.JSONRPCError(McpSchema.ErrorCodes.INTERNAL_ERROR,
-							t.getMessage());
+							t.getMessage() != null ? t.getMessage() : "Internal error");
 				}
 				return Mono.just(McpSchema.JSONRPCResponse.error(request.id(), error));
 			});

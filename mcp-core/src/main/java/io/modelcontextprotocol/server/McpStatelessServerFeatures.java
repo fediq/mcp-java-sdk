@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BiFunction;
 
 import io.modelcontextprotocol.common.McpTransportContext;
@@ -27,6 +28,20 @@ import reactor.core.scheduler.Schedulers;
  */
 public class McpStatelessServerFeatures {
 
+	private static final Set<String> STANDARD_REQUEST_METHODS = Set.of(McpSchema.METHOD_INITIALIZE,
+			McpSchema.METHOD_PING, McpSchema.METHOD_TOOLS_LIST, McpSchema.METHOD_TOOLS_CALL,
+			McpSchema.METHOD_RESOURCES_LIST, McpSchema.METHOD_RESOURCES_READ, McpSchema.METHOD_RESOURCES_TEMPLATES_LIST,
+			McpSchema.METHOD_RESOURCES_SUBSCRIBE, McpSchema.METHOD_RESOURCES_UNSUBSCRIBE, McpSchema.METHOD_PROMPT_LIST,
+			McpSchema.METHOD_PROMPT_GET, McpSchema.METHOD_COMPLETION_COMPLETE, McpSchema.METHOD_LOGGING_SET_LEVEL,
+			McpSchema.METHOD_ROOTS_LIST, McpSchema.METHOD_SAMPLING_CREATE_MESSAGE, McpSchema.METHOD_ELICITATION_CREATE);
+
+	static void validateRequestHandler(String method, McpStatelessRequestHandler<?> handler) {
+		Assert.hasText(method, "Request method must not be empty: " + method);
+		Assert.isTrue(method.equals(method.strip()), "Request method must not have surrounding whitespace: " + method);
+		Assert.notNull(handler, "Request handler must not be null: " + method);
+		Assert.isTrue(!STANDARD_REQUEST_METHODS.contains(method), "Standard request method is reserved: " + method);
+	}
+
 	/**
 	 * Asynchronous server features specification.
 	 *
@@ -38,6 +53,7 @@ public class McpStatelessServerFeatures {
 	 * @param prompts The map of prompt specifications
 	 * @param instructions The server instructions text
 	 * @param toolFilters The per-request filters deciding which tools are listed
+	 * @param requestHandlers The additional request handlers
 	 */
 	record Async(McpSchema.Implementation serverInfo, McpSchema.ServerCapabilities serverCapabilities,
 			List<McpStatelessServerFeatures.AsyncToolSpecification> tools,
@@ -45,7 +61,8 @@ public class McpStatelessServerFeatures {
 			Map<String, McpStatelessServerFeatures.AsyncResourceTemplateSpecification> resourceTemplates,
 			Map<String, McpStatelessServerFeatures.AsyncPromptSpecification> prompts,
 			Map<McpSchema.CompleteReference, McpStatelessServerFeatures.AsyncCompletionSpecification> completions,
-			String instructions, List<McpAsyncListFilter<McpSchema.Tool>> toolFilters) {
+			String instructions, List<McpAsyncListFilter<McpSchema.Tool>> toolFilters,
+			Map<String, McpStatelessRequestHandler<?>> requestHandlers) {
 
 		/**
 		 * Create an instance and validate the arguments.
@@ -57,6 +74,7 @@ public class McpStatelessServerFeatures {
 		 * @param prompts The map of prompt specifications
 		 * @param instructions The server instructions text
 		 * @param toolFilters The per-request filters deciding which tools are listed
+		 * @param requestHandlers The additional request handlers
 		 */
 		Async(McpSchema.Implementation serverInfo, McpSchema.ServerCapabilities serverCapabilities,
 				List<McpStatelessServerFeatures.AsyncToolSpecification> tools,
@@ -64,7 +82,8 @@ public class McpStatelessServerFeatures {
 				Map<String, McpStatelessServerFeatures.AsyncResourceTemplateSpecification> resourceTemplates,
 				Map<String, McpStatelessServerFeatures.AsyncPromptSpecification> prompts,
 				Map<McpSchema.CompleteReference, McpStatelessServerFeatures.AsyncCompletionSpecification> completions,
-				String instructions, List<McpAsyncListFilter<McpSchema.Tool>> toolFilters) {
+				String instructions, List<McpAsyncListFilter<McpSchema.Tool>> toolFilters,
+				Map<String, McpStatelessRequestHandler<?>> requestHandlers) {
 
 			Assert.notNull(serverInfo, "Server info must not be null");
 
@@ -87,6 +106,19 @@ public class McpStatelessServerFeatures {
 			this.completions = (completions != null) ? completions : Map.of();
 			this.instructions = instructions;
 			this.toolFilters = (toolFilters != null) ? toolFilters : List.of();
+			Assert.notNull(requestHandlers, "Request handlers must not be null");
+			this.requestHandlers = Map.copyOf(requestHandlers);
+		}
+
+		Async(McpSchema.Implementation serverInfo, McpSchema.ServerCapabilities serverCapabilities,
+				List<McpStatelessServerFeatures.AsyncToolSpecification> tools,
+				Map<String, AsyncResourceSpecification> resources,
+				Map<String, McpStatelessServerFeatures.AsyncResourceTemplateSpecification> resourceTemplates,
+				Map<String, McpStatelessServerFeatures.AsyncPromptSpecification> prompts,
+				Map<McpSchema.CompleteReference, McpStatelessServerFeatures.AsyncCompletionSpecification> completions,
+				String instructions, List<McpAsyncListFilter<McpSchema.Tool>> toolFilters) {
+			this(serverInfo, serverCapabilities, tools, resources, resourceTemplates, prompts, completions,
+					instructions, toolFilters, Map.of());
 		}
 
 		/**
@@ -130,7 +162,8 @@ public class McpStatelessServerFeatures {
 					syncSpec.toolFilters()
 						.stream()
 						.map(filter -> McpAsyncListFilter.fromSync(filter, immediateExecution))
-						.toList());
+						.toList(),
+					Map.of());
 		}
 	}
 

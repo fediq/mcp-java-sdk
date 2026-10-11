@@ -19,7 +19,8 @@ public interface McpStatelessRequestHandler<R> {
 	 * Handle the request and complete with a result.
 	 * @param transportContext {@link McpTransportContext} associated with the transport
 	 * @param params the payload of the MCP request
-	 * @return Mono which completes with the response object
+	 * @return Mono emitting exactly one non-null result payload, not a JSON-RPC response;
+	 * an empty publisher must not be used for a successful response
 	 */
 	Mono<R> handle(McpTransportContext transportContext, Object params);
 

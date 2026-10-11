@@ -1506,6 +1506,8 @@ public interface McpServer {
 
 		private final McpStatelessServerTransport transport;
 
+		private final Map<String, McpStatelessRequestHandler<?>> requestHandlers = new HashMap<>();
+
 		McpUriTemplateManagerFactory uriTemplateManagerFactory = new DefaultMcpUriTemplateManagerFactory();
 
 		McpJsonMapper jsonMapper;
@@ -1523,6 +1525,40 @@ public interface McpServer {
 		boolean validateToolInputs = true;
 
 		final List<McpAsyncListFilter<McpSchema.Tool>> toolFilters = new ArrayList<>();
+
+		/**
+		 * Registers an additional request handler without changing server capabilities.
+		 * The handler must emit one non-null result payload, not a JSON-RPC response.
+		 * @param method a nonempty method name without surrounding whitespace
+		 * @param handler the request handler
+		 * @return this specification
+		 * @throws IllegalArgumentException for null values, invalid, reserved or
+		 * duplicate method names
+		 */
+		public StatelessAsyncSpecification requestHandler(String method, McpStatelessRequestHandler<?> handler) {
+			McpStatelessServerFeatures.validateRequestHandler(method, handler);
+			Assert.isTrue(!this.requestHandlers.containsKey(method), "Duplicate request method: " + method);
+			this.requestHandlers.put(method, handler);
+			return this;
+		}
+
+		/**
+		 * Registers additional request handlers atomically. Entries follow the same rules
+		 * as {@link #requestHandler(String, McpStatelessRequestHandler)}.
+		 * @param handlers additional handlers; an empty map is allowed
+		 * @return this specification
+		 * @throws IllegalArgumentException if any entry is invalid or conflicts
+		 */
+		public StatelessAsyncSpecification requestHandlers(Map<String, McpStatelessRequestHandler<?>> handlers) {
+			Assert.notNull(handlers, "Request handlers must not be null");
+			Map<String, McpStatelessRequestHandler<?>> additions = new HashMap<>(handlers);
+			additions.forEach((method, handler) -> {
+				McpStatelessServerFeatures.validateRequestHandler(method, handler);
+				Assert.isTrue(!this.requestHandlers.containsKey(method), "Duplicate request method: " + method);
+			});
+			this.requestHandlers.putAll(additions);
+			return this;
+		}
 
 		/**
 		 * The Model Context Protocol (MCP) allows servers to expose tools that can be
@@ -2025,7 +2061,7 @@ public interface McpServer {
 		public McpStatelessAsyncServer build() {
 			var features = new McpStatelessServerFeatures.Async(this.serverInfo, this.serverCapabilities, this.tools,
 					this.resources, this.resourceTemplates, this.prompts, this.completions, this.instructions,
-					this.toolFilters);
+					this.toolFilters, this.requestHandlers);
 			var jsonSchemaValidator = this.jsonSchemaValidator != null ? this.jsonSchemaValidator
 					: McpJsonDefaults.getSchemaValidator();
 
