@@ -22,6 +22,9 @@ import reactor.test.StepVerifier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
@@ -137,6 +140,60 @@ class StatelessRequestHandlerRegistrationTests {
 				assertThat(response.id()).isEqualTo(7);
 				assertThat(response.error()).isNull();
 				assertThat(response.result()).isEqualTo(Map.of());
+			})
+			.verifyComplete();
+	}
+
+	/**
+	 * Standard resources/read previously failed to route nested reserved paths. The
+	 * default manager must dispatch the request without changing its encoded URI.
+	 */
+	@Test
+	void standardResourceReadPreservesReservedNestedUri() {
+		var transport = mock(McpStatelessServerTransport.class);
+		var mapper = mock(McpJsonMapper.class);
+		String uri = "skill://woofproof-internal/test-skill/references/notes%20with%20space%2f%2F.md";
+		var params = Map.of("uri", uri);
+		var missingParams = Map.of("uri", "skill://unknown/test-skill/references/missing.md");
+		when(mapper.convertValue(eq(params), any(io.modelcontextprotocol.json.TypeRef.class)))
+			.thenReturn(new McpSchema.ReadResourceRequest(uri));
+		when(mapper.convertValue(eq(missingParams), any(io.modelcontextprotocol.json.TypeRef.class)))
+			.thenReturn(new McpSchema.ReadResourceRequest(missingParams.get("uri")));
+		var content = new McpSchema.TextResourceContents(uri, "text/markdown", "Nested resource", null);
+		var result = new McpSchema.ReadResourceResult(List.of(content), null);
+		McpServer.async(transport)
+			.jsonMapper(mapper)
+			.jsonSchemaValidator(mock(JsonSchemaValidator.class))
+			.capabilities(McpSchema.ServerCapabilities.builder().resources(false, false).build())
+			.resourceTemplates(
+					new McpStatelessServerFeatures.AsyncResourceTemplateSpecification(McpSchema.ResourceTemplate
+						.builder("skill://woofproof-internal/{skillName}/{+relativePath}", "skill")
+						.build(), (ctx, request) -> {
+							assertThat(request.uri()).isEqualTo(uri);
+							return Mono.just(result);
+						}))
+			.build();
+		var captor = ArgumentCaptor.forClass(McpStatelessServerHandler.class);
+		verify(transport).setMcpHandler(captor.capture());
+		var dispatcher = captor.getValue();
+		StepVerifier.create(dispatcher.handleRequest(McpTransportContext.EMPTY,
+				new McpSchema.JSONRPCRequest("resources/read", "nested-id", params)))
+			.assertNext(response -> {
+				assertThat(response.jsonrpc()).isEqualTo("2.0");
+				assertThat(response.id()).isEqualTo("nested-id");
+				assertThat(response.error()).isNull();
+				assertThat(response.result()).isInstanceOf(McpSchema.ReadResourceResult.class).isSameAs(result);
+				assertThat(((McpSchema.ReadResourceResult) response.result()).contents().get(0).uri()).isEqualTo(uri);
+			})
+			.verifyComplete();
+		StepVerifier
+			.create(dispatcher.handleRequest(McpTransportContext.EMPTY,
+					new McpSchema.JSONRPCRequest("resources/read", "missing-id", missingParams)))
+			.assertNext(response -> {
+				assertThat(response.jsonrpc()).isEqualTo("2.0");
+				assertThat(response.id()).isEqualTo("missing-id");
+				assertThat(response.result()).isNull();
+				assertThat(response.error().code()).isEqualTo(-32002);
 			})
 			.verifyComplete();
 	}

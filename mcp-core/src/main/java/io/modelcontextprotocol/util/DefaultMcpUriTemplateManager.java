@@ -22,9 +22,9 @@ import java.util.regex.Pattern;
 public class DefaultMcpUriTemplateManager implements McpUriTemplateManager {
 
 	/**
-	 * Pattern to match URI variables in the format {variableName}.
+	 * Pattern to match simple {variableName} and reserved {+variableName} expressions.
 	 */
-	private static final Pattern URI_VARIABLE_PATTERN = Pattern.compile("\\{([^/]+?)\\}");
+	private static final Pattern URI_VARIABLE_PATTERN = Pattern.compile("\\{(\\+?)([^/]+?)\\}");
 
 	private final String uriTemplate;
 
@@ -50,7 +50,7 @@ public class DefaultMcpUriTemplateManager implements McpUriTemplateManager {
 		Matcher matcher = URI_VARIABLE_PATTERN.matcher(this.uriTemplate);
 
 		while (matcher.find()) {
-			String variableName = matcher.group(1);
+			String variableName = matcher.group(2);
 			if (variables.contains(variableName)) {
 				throw new IllegalArgumentException("Duplicate URI variable name in template: " + variableName);
 			}
@@ -80,37 +80,9 @@ public class DefaultMcpUriTemplateManager implements McpUriTemplateManager {
 		}
 
 		try {
-			// Create a regex pattern by replacing each {variableName} with a capturing
-			// group
-			StringBuilder patternBuilder = new StringBuilder("^");
+			Matcher matcher = createUriPattern().matcher(requestUri);
 
-			// Find all variable placeholders and their positions
-			Matcher variableMatcher = URI_VARIABLE_PATTERN.matcher(uriTemplate);
-			int lastEnd = 0;
-
-			while (variableMatcher.find()) {
-				// Add the text between the last variable and this one, escaped for regex
-				String textBefore = uriTemplate.substring(lastEnd, variableMatcher.start());
-				patternBuilder.append(Pattern.quote(textBefore));
-
-				// Add a capturing group for the variable
-				patternBuilder.append("([^/]+)");
-
-				lastEnd = variableMatcher.end();
-			}
-
-			// Add any remaining text after the last variable
-			if (lastEnd < uriTemplate.length()) {
-				patternBuilder.append(Pattern.quote(uriTemplate.substring(lastEnd)));
-			}
-
-			patternBuilder.append("$");
-
-			// Compile the pattern and match against the request URI
-			Pattern pattern = Pattern.compile(patternBuilder.toString());
-			Matcher matcher = pattern.matcher(requestUri);
-
-			if (matcher.find() && matcher.groupCount() == uriVariables.size()) {
+			if (matcher.matches() && matcher.groupCount() == uriVariables.size()) {
 				for (int i = 0; i < uriVariables.size(); i++) {
 					String value = matcher.group(i + 1);
 					if (value == null || value.isEmpty()) {
@@ -141,30 +113,24 @@ public class DefaultMcpUriTemplateManager implements McpUriTemplateManager {
 			return uri.equals(this.uriTemplate);
 		}
 
-		// Convert the URI template into a robust regex pattern that escapes special
-		// characters like '?'.
+		return createUriPattern().matcher(uri).matches();
+	}
+
+	private Pattern createUriPattern() {
 		StringBuilder patternBuilder = new StringBuilder("^");
 		Matcher variableMatcher = URI_VARIABLE_PATTERN.matcher(this.uriTemplate);
 		int lastEnd = 0;
 
 		while (variableMatcher.find()) {
-			// Append the literal part of the template, safely quoted
-			String textBefore = this.uriTemplate.substring(lastEnd, variableMatcher.start());
-			patternBuilder.append(Pattern.quote(textBefore));
-			// Append a capturing group for the variable itself
-			patternBuilder.append("([^/]+?)");
+			patternBuilder.append(Pattern.quote(this.uriTemplate.substring(lastEnd, variableMatcher.start())));
+			// Reserved expressions can span path segments; simple variables cannot.
+			patternBuilder.append(variableMatcher.group(1).equals("+") ? "(.+)" : "([^/]+)");
 			lastEnd = variableMatcher.end();
 		}
 
-		// Append any remaining literal text after the last variable
-		if (lastEnd < this.uriTemplate.length()) {
-			patternBuilder.append(Pattern.quote(this.uriTemplate.substring(lastEnd)));
-		}
-
+		patternBuilder.append(Pattern.quote(this.uriTemplate.substring(lastEnd)));
 		patternBuilder.append("$");
-
-		// Check if the URI matches the regex
-		return Pattern.compile(patternBuilder.toString()).matcher(uri).matches();
+		return Pattern.compile(patternBuilder.toString());
 	}
 
 	@Override

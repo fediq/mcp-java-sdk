@@ -103,4 +103,52 @@ public class McpUriTemplateManagerTests {
 				"Should correctly match a URI containing query parameters.");
 	}
 
+	/**
+	 * Reserved expressions previously treated '+' as part of the name and rejected nested
+	 * paths. Matching and extraction must preserve the original encoded value.
+	 */
+	@Test
+	void shouldMatchAndExtractReservedNestedPath() {
+		String template = "skill://woofproof-internal/{skillName}/{+relativePath}";
+		var manager = this.uriTemplateFactory.create(template);
+		assertEquals(List.of("skillName", "relativePath"), manager.getVariableNames());
+		for (String path : List.of("SKILL.md", "references/notes%20with%20space.md", "references/deep/asset%2f%2F.bin",
+				"./../references/asset.bin")) {
+			String uri = "skill://woofproof-internal/test-skill/" + path;
+			assertTrue(manager.matches(uri));
+			assertEquals(Map.of("skillName", "test-skill", "relativePath", path), manager.extractVariableValues(uri));
+		}
+		String nestedUri = "skill://woofproof-internal/test-skill/references/asset.bin";
+		var simpleManager = this.uriTemplateFactory.create(template.replace("{+relativePath}", "{relativePath}"));
+		assertFalse(simpleManager.matches(nestedUri));
+		assertEquals(Map.of(), simpleManager.extractVariableValues(nestedUri));
+		assertFalse(manager.matches("skill://woofproof-internal/test-skill/"));
+		assertEquals(Map.of(), manager.extractVariableValues("skill://woofproof-internal/test-skill/"));
+	}
+
+	/**
+	 * The reserved operator must not hide duplicate variable declarations.
+	 */
+	@Test
+	void shouldRejectMixedDuplicateVariables() {
+		assertThrows(IllegalArgumentException.class,
+				() -> this.uriTemplateFactory.create("/{path}/{+path}").getVariableNames());
+	}
+
+	/**
+	 * Reserved paths must stop at the literal suffix, with regex delimiters quoted.
+	 */
+	@Test
+	void shouldMatchReservedPathWithLiteralSuffix() {
+		var manager = this.uriTemplateFactory.create("file:///{+path}?download=true");
+		String uri = "file:///references/deep/notes%20with%20space.md?download=true";
+		assertTrue(manager.matches(uri));
+		assertEquals(Map.of("path", "references/deep/notes%20with%20space.md"), manager.extractVariableValues(uri));
+		for (String invalidUri : List.of(uri + "extra", uri.replace("?download", "Xdownload"), "prefix" + uri,
+				"file:///?download=true")) {
+			assertFalse(manager.matches(invalidUri));
+			assertEquals(Map.of(), manager.extractVariableValues(invalidUri));
+		}
+	}
+
 }
